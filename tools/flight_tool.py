@@ -93,6 +93,7 @@ CITY_MAIN_AIRPORT = {
     "dhaka": "DAC",
     "silchar": "IXS",
     "new delhi": "DEL",
+    "delhi": "DEL",
     "mumbai": "BOM",
     "kolkata": "CCU",
     "chennai": "MAA",
@@ -321,19 +322,24 @@ def find_location_mentions(query: str):
 def parse_route(query: str):
     """
     Returns:
-    dep_iata, arr_iata
+        dep_iata, arr_iata
 
-    Can return:
-    None, None  -> global live flights
-    DAC, NRT    -> filtered route
-    DAC, None   -> all flights from DAC
-    None, NRT   -> all flights to NRT
+    Examples:
+        "from Delhi to Dubai" -> DEL, DXB
+        "to Dubai from Delhi" -> DEL, DXB
+        "Dubai trip from Delhi" -> DEL, DXB
+        "Japan trip from Bangladesh" -> DAC, NRT
+        "flights from Delhi" -> DEL, None
+        "flights to Dubai" -> None, DXB
     """
 
     q = query.strip()
     q_lower = q.lower()
 
+    # =========================
     # Global / all-country query
+    # =========================
+
     global_keywords = [
         "all country",
         "all countries",
@@ -348,15 +354,20 @@ def parse_route(query: str):
     if any(keyword in q_lower for keyword in global_keywords):
         return None, None
 
-    # Direct IATA code route: DAC to NRT
+    # =========================
+    # Direct IATA route
+    # Example: DEL to DXB
+    # =========================
+
     codes = re.findall(r"\b[A-Z]{3}\b", q)
 
     if len(codes) >= 2:
-        dep = codes[0].upper()
-        arr = codes[1].upper()
-        return dep, arr
+        return codes[0].upper(), codes[1].upper()
 
-    # Pattern: from X to Y
+    # =========================
+    # "from X to Y"
+    # =========================
+
     match = re.search(
         r"\bfrom\s+(.+?)\s+\bto\s+(.+?)(?:\s+(?:on|for|under|including|with|in|at)\b|[.!?]|$)",
         q_lower,
@@ -371,7 +382,10 @@ def parse_route(query: str):
 
         return dep_iata, arr_iata
 
-    # Pattern: to Y from X
+    # =========================
+    # "to Y from X"
+    # =========================
+
     match = re.search(
         r"\bto\s+(.+?)\s+\bfrom\s+(.+?)(?:\s+(?:on|for|under|including|with|in|at)\b|[.!?]|$)",
         q_lower,
@@ -386,32 +400,105 @@ def parse_route(query: str):
 
         return dep_iata, arr_iata
 
-    # Pattern: flights from X
-    match = re.search(r"\bfrom\s+(.+?)(?:[.!?]|$)", q_lower)
+    # =========================
+    # "destination trip from origin"
+    #
+    # Example:
+    # Dubai trip from Delhi
+    # Japan trip from Bangladesh
+    # =========================
+
+    match = re.search(
+        r"\b(.+?)\s+trip\s+from\s+(.+?)(?:\s+(?:with|including|under|on|for)\b|[.!?]|$)",
+        q_lower,
+    )
+
+    if match:
+        destination_text = match.group(1)
+        origin_text = match.group(2)
+
+        dep_iata = resolve_location_to_iata(origin_text)
+
+        # Try to resolve destination directly
+        arr_iata = resolve_location_to_iata(destination_text)
+
+        if dep_iata and arr_iata:
+            return dep_iata, arr_iata
+
+        # If destination contains extra words, search mentions
+        destination_mentions = find_location_mentions(destination_text)
+
+        if destination_mentions:
+            arr_iata = resolve_location_to_iata(destination_mentions[-1])
+
+        return dep_iata, arr_iata
+
+    # =========================
+    # "X to Y"
+    # Example: Delhi to Dubai
+    # =========================
+
+    match = re.search(
+        r"^(.+?)\s+\bto\b\s+(.+?)(?:\s+(?:flights?|tickets?|on|for|under|including|with|in|at)\b|[.!?]|$)",
+        q_lower
+    )
 
     if match:
         origin_text = match.group(1)
+        dest_text = match.group(2)
+
         dep_iata = resolve_location_to_iata(origin_text)
+        arr_iata = resolve_location_to_iata(dest_text)
+
+        return dep_iata, arr_iata
+
+    # =========================
+    # "from X"
+    # =========================
+
+    match = re.search(
+        r"\bfrom\s+(.+?)(?:[.!?]|$)",
+        q_lower
+    )
+
+    if match:
+        origin_text = match.group(1)
+
+        dep_iata = resolve_location_to_iata(origin_text)
+
         return dep_iata, None
 
-    # Pattern: flights to X
-    match = re.search(r"\bto\s+(.+?)(?:[.!?]|$)", q_lower)
+    # =========================
+    # "to X"
+    # =========================
+
+    match = re.search(
+        r"\bto\s+(.+?)(?:[.!?]|$)",
+        q_lower
+    )
 
     if match:
         dest_text = match.group(1)
+
         arr_iata = resolve_location_to_iata(dest_text)
+
         return None, arr_iata
 
-    # Fallback: find country/city mentions
+    # =========================
+    # Fallback: location mentions
+    # =========================
+
     mentions = find_location_mentions(q)
 
     if len(mentions) >= 2:
         dep_iata = resolve_location_to_iata(mentions[0])
         arr_iata = resolve_location_to_iata(mentions[1])
+
         return dep_iata, arr_iata
 
     if len(mentions) == 1:
         arr_iata = resolve_location_to_iata(mentions[0])
+
         return DEFAULT_ORIGIN_IATA, arr_iata
 
     return None, None
@@ -534,6 +621,16 @@ def search_flights(query: str, limit: int = 10):
 
 
 if __name__ == "__main__":
-    print(search_flights("Plan a 7 days Japan trip from Bangladesh"))
-    print("\n" + "=" * 80 + "\n")
-    print(search_flights("all country flight info"))
+
+    tests = [
+        "Plan a 5 days Dubai trip from Delhi",
+        "Plan a 7 days Japan trip from Bangladesh",
+        "Plan a 7 days Thailand trip from Silchar",
+        "flights from Delhi",
+        "flights to Dubai",
+        "Delhi to Dubai flights",
+    ]
+
+    for query in tests:
+        print("\nQUERY:", query)
+        print("ROUTE:", parse_route(query))

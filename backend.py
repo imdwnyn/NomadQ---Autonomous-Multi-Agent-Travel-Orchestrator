@@ -144,38 +144,232 @@ Make the itinerary practical, budget-aware, and easy to follow.
 # =========================
 
 def final_agent(state: TravelState):
-    final_prompt = f"""
-Generate the final travel response for the user.
 
-User Request:
+    final_prompt = f"""
+You are the final presentation agent for an AI travel planner.
+
+Your job is to take the raw flight data, hotel research, and itinerary below
+and turn them into ONE polished, concise travel plan.
+
+USER REQUEST:
 {state['user_query']}
 
-Flights:
+FLIGHT DATA:
 {state['flight_results']}
 
-Hotels:
+HOTEL DATA:
 {state['hotel_results']}
 
-Itinerary:
+ITINERARY:
 {state['itinerary']}
 
-Format the final answer beautifully using these sections:
 
-1. Trip Summary
-2. Flight Information
-3. Hotel Suggestions
-4. Day-by-Day Itinerary
-5. Estimated Budget
-6. Final Recommendations
+========================
+OUTPUT REQUIREMENTS
+========================
 
-Important:
-- Be clear and practical.
-- Mention that live flight API may not provide ticket prices if pricing is unavailable.
-- Keep the response useful for real travel planning.
+Create a professional travel brief.
+
+Start with ONE title:
+
+# [Destination] Trip Planning: A [X]-Day Trip from [Origin]
+
+Then use exactly these six sections:
+
+## 1. Trip Summary
+## 2. Flight Information
+## 3. Hotel Suggestions
+## 4. Day-by-Day Itinerary
+## 5. Estimated Budget
+## 6. Final Recommendations
+
+
+========================
+STYLE
+========================
+
+Make the answer concise, clean and easy to scan.
+
+DO:
+- Use bullet points.
+- Use nested bullets when useful.
+- Use **bold labels**.
+- Keep paragraphs to 1–2 sentences.
+- Use short sections.
+- Use tables when they make comparison easier.
+- Summarize information instead of repeating it.
+- Prioritize the most useful recommendations.
+- Use airport IATA codes.
+- Clearly distinguish estimated prices from live prices.
+
+DO NOT:
+- Repeat the same disclaimer multiple times.
+- Repeat the same flight/API information in different sections.
+- Repeat booking websites unnecessarily.
+- Write long explanatory paragraphs.
+- Add a "Next steps I can do for you" section.
+- Add a generic introduction before the title.
+- Add a generic conclusion after Final Recommendations.
+- Mention these formatting instructions.
+- Invent live prices or availability.
+
+
+========================
+SECTION REQUIREMENTS
+========================
+
+## 1. Trip Summary
+
+Give a compact overview using 4–6 bullets.
+
+Include:
+- Duration
+- Route
+- Traveller assumption
+- Travel style
+- Main highlights
+- One important booking assumption if necessary
+
+
+## 2. Flight Information
+
+Keep this section practical.
+
+Start with:
+
+**Recommended route:** ...
+
+Then provide the best 2–3 routing options.
+
+Use a table when useful:
+
+| Option | Route | Notes |
+|---|---|---|
+| A | ... | ... |
+| B | ... | ... |
+| C | ... | ... |
+
+Mention flight pricing availability ONLY ONCE.
+
+If live ticket prices are unavailable, write one short note:
+
+> **Pricing note:** Live ticket prices are unavailable from the current flight data. Check a flight-pricing source for current fares.
+
+Do not repeat this disclaimer elsewhere.
+
+
+## 3. Hotel Suggestions
+
+Group hotels by city.
+
+For example:
+
+### Bangkok — 3 nights
+
+| Hotel | Type | Approx. Price/Night |
+|---|---|---|
+| Hotel A | Budget | ₹X–₹Y |
+| Hotel B | Budget | ₹X–₹Y |
+| Hotel C | Budget | ₹X–₹Y |
+
+Then do the same for Phuket.
+
+Only include 2–4 useful options per city.
+
+Do not write long descriptions for every hotel.
+
+
+## 4. Day-by-Day Itinerary
+
+Keep each day compact.
+
+Use this exact format:
+
+### Day 1 — Arrival & Bangkok
+
+- **Morning:** ...
+- **Afternoon:** ...
+- **Evening:** ...
+- **Stay:** Bangkok
+
+### Day 2 — Bangkok Temples
+
+- **Morning:** ...
+- **Afternoon:** ...
+- **Evening:** ...
+- **Stay:** Bangkok
+
+Continue for every day.
+
+Avoid writing more than 4 bullets per day.
+
+Focus on the most important activities.
+
+
+## 5. Estimated Budget
+
+Present the budget as a table.
+
+| Expense | Estimated Cost |
+|---|---:|
+| International flights | ₹X–₹Y |
+| Domestic flights | ₹X–₹Y |
+| Hotels | ₹X–₹Y |
+| Food | ₹X–₹Y |
+| Local transport | ₹X–₹Y |
+| Activities | ₹X–₹Y |
+| Other | ₹X–₹Y |
+| **Estimated Total** | **₹X–₹Y** |
+
+Clearly mark estimates.
+
+Do not invent exact prices.
+
+
+## 6. Final Recommendations
+
+Give only 4–6 useful recommendations.
+
+Examples:
+- Best area to stay
+- Best flight routing
+- When to book
+- Important transfer buffer
+- Visa/passport reminder
+- Travel insurance reminder
+
+Do not repeat information already explained above.
+
+
+========================
+IMPORTANT
+========================
+
+The final response should feel like a professionally designed travel
+document rather than an AI-generated essay.
+
+Be informative but concise.
+
+Prefer:
+
+**Useful information → short explanation**
+
+instead of:
+
+**Long explanation → repeated disclaimer → recommendation**
+
+Return ONLY the final Markdown travel plan.
 """
 
     response = llm.invoke([
-        SystemMessage(content="You are a professional AI travel booking assistant."),
+        SystemMessage(
+            content=(
+                "You are a professional travel-planning editor. "
+                "Your job is to synthesize raw research into a concise, "
+                "well-structured travel brief. Never unnecessarily repeat "
+                "information."
+            )
+        ),
         HumanMessage(content=final_prompt)
     ])
 
