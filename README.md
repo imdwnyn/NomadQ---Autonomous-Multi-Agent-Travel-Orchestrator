@@ -1,1167 +1,231 @@
 # ✈️ NomadQ — Autonomous Multi-Agent Travel Orchestrator
 
-> An AI-powered multi-agent travel planning system that transforms natural-language travel requests into personalized, research-backed travel plans.
+> A production-ready, stateful multi-agent travel planning system built with **LangGraph**, **FastAPI**, and **PostgreSQL**. NomadQ transforms natural-language travel queries into structured, end-to-end travel plans by coordinating specialized agents for route extraction, flight lookup, hotel discovery, and itinerary generation.
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python\&logoColor=white)](https://www.python.org/)
-[![LangGraph](https://img.shields.io/badge/LangGraph-Agent%20Orchestration-1C3C3C)](https://langchain-ai.github.io/langgraph/)
-[![LangSmith](https://img.shields.io/badge/LangSmith-Observability-1C3C3C)](https://smith.langchain.com/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi\&logoColor=white)](https://fastapi.tiangolo.com/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Database-4169E1?logo=postgresql\&logoColor=white)](https://www.postgresql.org/)
-[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker\&logoColor=white)](https://www.docker.com/)
-[![Render](https://img.shields.io/badge/Render-Deployed-46E3B7?logo=render\&logoColor=white)](https://render.com/)
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/LangGraph-Sequential%20StateGraph-1C3C3C?style=for-the-badge" alt="LangGraph" />
+  <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/PostgreSQL-Checkpointer-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/Docker-Containerized-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/Render-Deployed-46E3B7?style=for-the-badge&logo=render&logoColor=white" alt="Render" />
+</p>
 
 ---
 
 ## 📌 Overview
 
-NomadQ is an **autonomous multi-agent travel orchestrator** designed to handle complex travel planning tasks through a coordinated set of specialized AI agents.
+Traditional travel planning fragments attention across flight aggregators, hotel search engines, local blogs, and budget calculators. Sending the entire task to a single zero-shot LLM prompt frequently leads to hallucinated routes, inaccurate airport pairings, and missing logistical constraints.
 
-Instead of relying on a single LLM prompt to produce an itinerary, NomadQ divides the task into specialized workflows such as:
+**NomadQ** solves this by decomposing travel orchestration into a deterministic, sequential **LangGraph** pipeline of four specialized agents. Each node updates a shared runtime state (`TravelState`), integrating live flight schedules via **AviationStack**, hotel intelligence via **Tavily**, and structured synthesis via **OpenAI**.
 
-* ✈️ Flight search
-* 🏨 Hotel research
-* 🗺️ Destination and activity research
-* 📅 Itinerary planning
-* 💡 Personalized recommendations
-* 🧠 Context-aware conversation handling
-
-The system uses **LangGraph** to manage the workflow between agents and maintain structured state throughout the planning process.
-
-A user can provide a request such as:
-
-> "Plan a 5-day trip to Bali from Delhi under ₹80,000 with a focus on beaches, cafes, and nightlife."
-
-NomadQ processes the request, gathers relevant information from external APIs and web sources, and produces a structured travel plan based on the user's requirements.
-
----
-
-## 🎯 Key Features
-
-### 🤖 Multi-Agent Architecture
-
-NomadQ uses multiple specialized agents instead of a single monolithic LLM chain.
-
-Each agent is responsible for a focused task:
-
-| Agent                   | Responsibility                                               |
-| ----------------------- | ------------------------------------------------------------ |
-| 🧭 Planner Agent        | Understands the user's request and determines required tasks |
-| ✈️ Flight Agent         | Searches and analyzes available flight information           |
-| 🏨 Hotel Agent          | Researches accommodation options                             |
-| 🔎 Research Agent       | Collects destination information and activities              |
-| 📅 Itinerary Agent      | Converts research into a day-by-day itinerary                |
-| 💡 Recommendation Agent | Personalizes recommendations based on user preferences       |
-| 📝 Final Response Agent | Combines outputs into a coherent travel response             |
-
-This separation makes the system easier to extend, debug, and maintain.
-
----
-
-### 🔄 LangGraph Workflow Orchestration
-
-LangGraph acts as the orchestration layer connecting the agents.
-
-Instead of a fixed sequential pipeline, the workflow maintains a shared state and routes execution between nodes based on the task.
-
-A simplified workflow looks like:
-
-```text
-                   ┌─────────────────────┐
-                   │   User Request      │
-                   └──────────┬──────────┘
-                              │
-                              ▼
-                   ┌─────────────────────┐
-                   │   Planner Agent     │
-                   └──────────┬──────────┘
-                              │
-             ┌────────────────┼────────────────┐
-             ▼                ▼                ▼
-      ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-      │Flight Agent │  │ Hotel Agent │  │Research Agent│
-      └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
-             │                │                │
-             └────────────────┼────────────────┘
-                              ▼
-                   ┌─────────────────────┐
-                   │ Itinerary Agent     │
-                   └──────────┬──────────┘
-                              │
-                              ▼
-                   ┌─────────────────────┐
-                   │ Recommendation      │
-                   │ Agent               │
-                   └──────────┬──────────┘
-                              │
-                              ▼
-                   ┌─────────────────────┐
-                   │ Final Response      │
-                   └─────────────────────┘
 ```
-
-The graph-based design allows individual agents to be modified or replaced without redesigning the entire application.
-
----
-
-## 🧠 How NomadQ Works
-
-### Step 1 — Natural Language Input
-
-The user provides a travel request using normal conversational language.
-
-Example:
-
-```text
-I want to travel from Kolkata to Thailand for 6 days
-in December. My budget is ₹70,000 and I prefer beaches,
-local food and nightlife.
-```
-
-The system extracts relevant information such as:
-
-* Origin
-* Destination
-* Travel dates
-* Trip duration
-* Budget
-* Interests
-* Preferences
-* Constraints
-
----
-
-### Step 2 — Task Planning
-
-The Planner Agent determines which tasks need to be performed.
-
-For example:
-
-```text
-User Request
-     │
-     ▼
-Trip Understanding
-     │
-     ├── Flight Search
-     ├── Hotel Research
-     ├── Destination Research
-     └── Preference Analysis
-```
-
-The planner then passes the relevant context to downstream agents.
-
----
-
-### Step 3 — External Information Retrieval
-
-NomadQ connects to external services to obtain travel information.
-
-#### ✈️ AviationStack API
-
-Used for flight-related information and aviation data.
-
-```text
-User Query
-    ↓
-Flight Agent
-    ↓
-AviationStack API
-    ↓
-Flight Information
-```
-
-#### 🔎 Tavily API
-
-Used for web research and destination-level information.
-
-The research workflow can retrieve information about:
-
-* Attractions
-* Restaurants
-* Activities
-* Local experiences
-* Destination-specific recommendations
-* Travel considerations
-
----
-
-### Step 4 — Parallel Agent Execution
-
-Independent tasks can be executed separately.
-
-For example:
-
-```text
-                 User Request
-                      │
-                 Planner Agent
-                      │
-        ┌─────────────┼─────────────┐
-        ▼             ▼             ▼
-     Flights        Hotels      Destination
-        │             │             │
-        └─────────────┼─────────────┘
-                      ▼
-              Itinerary Planner
-```
-
-This architecture helps keep responsibilities isolated while allowing their results to be combined later.
-
----
-
-### Step 5 — Itinerary Generation
-
-The Itinerary Agent receives the collected information and generates a structured travel plan.
-
-Example structure:
-
-```text
-Day 1
-├── Arrival
-├── Hotel Check-in
-└── Evening Activity
-
-Day 2
-├── Morning Attraction
-├── Local Lunch
-└── Night Market
-
-Day 3
-├── Beach Activity
-├── Cafe
-└── Nightlife
-```
-
-The generated itinerary is based on the destination, trip duration, interests, budget, and available research.
-
----
-
-### Step 6 — Personalized Recommendations
-
-The Recommendation Agent adapts the final plan to the user's stated preferences.
-
-For example:
-
-```text
-Preference:
-"Budget-conscious + beaches + local food"
-
-            ↓
-
-Recommendations:
-• Affordable beach areas
-• Local restaurants
-• Budget-friendly activities
-• Lower-cost transportation
-```
-
-This makes the final output more personalized than a generic destination guide.
-
----
-
-### Step 7 — Final Response Generation
-
-The final agent combines:
-
-* Flight information
-* Hotel research
-* Destination research
-* Itinerary
-* Recommendations
-* User preferences
-
-into a single conversational response.
-
----
-
-# 🏗️ System Architecture
-
-```text
-                         ┌──────────────────┐
-                         │      Client      │
-                         │   Web / Frontend │
-                         └────────┬─────────┘
-                                  │
-                                  ▼
-                         ┌──────────────────┐
-                         │     FastAPI      │
-                         │    API Layer     │
-                         └────────┬─────────┘
-                                  │
-                                  ▼
-                    ┌─────────────────────────┐
-                    │      LangGraph          │
-                    │  Agent Orchestration    │
-                    └───────────┬─────────────┘
-                                │
-             ┌──────────────────┼──────────────────┐
-             │                  │                  │
-             ▼                  ▼                  ▼
-      ┌────────────┐     ┌────────────┐     ┌──────────────┐
-      │   Flight   │     │   Hotel    │     │  Research    │
-      │   Agent    │     │   Agent    │     │    Agent     │
-      └─────┬──────┘     └─────┬──────┘     └──────┬───────┘
-            │                  │                   │
-            ▼                  ▼                   ▼
-      AviationStack       External Search        Tavily
-            │                  │                   │
-            └──────────────────┼───────────────────┘
-                               ▼
-                     ┌──────────────────┐
-                     │ Itinerary Agent  │
-                     └────────┬─────────┘
-                              │
-                              ▼
-                     ┌──────────────────┐
-                     │ Recommendation   │
-                     │     Agent        │
-                     └────────┬─────────┘
-                              │
-                              ▼
-                     ┌──────────────────┐
-                     │ Final Response   │
-                     └────────┬─────────┘
-                              │
-                              ▼
-                    ┌────────────────────┐
-                    │    PostgreSQL      │
-                    │ Conversation State │
-                    └────────────────────┘
-
-                    ┌────────────────────┐
-                    │     LangSmith      │
-                    │ Tracing / Debugging│
-                    │   / Observability  │
-                    └────────────────────┘
+User Prompt ──► FastAPI (/api/travel) ──► LangGraph StateGraph (Postgres Checkpointed)
+                                                   │
+  ┌────────────────────────────────────────────────┴────────────────────────────────────────┐
+  ▼                               ▼                            ▼                            ▼
+[Flight Agent]            [Hotel Agent]               [Itinerary Agent]            [Final Agent]
+• GPT-4o-mini extraction  • Tavily web search         • GPT-4o-mini planning        • GPT-4o-mini synthesis
+• IATA normalization      • Snippet curation          • Multi-day scheduling       • Markdown/Table export
+• AviationStack API       • Context injection         • Budget alignment           • Actionable advice
+  │                               │                            │                            │
+  └───────────────────────────────┴────────────────────────────┴────────────────────────────┘
+                                                   │
+                                                   ▼
+                         Structured Travel Plan (Web UI / PDF Export)
 ```
 
 ---
 
-# 🧩 Technology Stack
+## 🏗️ Core Architecture & Agent Workflow
 
-| Technology                  | Purpose                                  |
-| --------------------------- | ---------------------------------------- |
-| **Python**                  | Core application and agent logic         |
-| **LangGraph**               | Multi-agent workflow orchestration       |
-| **LangChain**               | LLM and tool integration                 |
-| **OpenAI**                  | Large language model capabilities        |
-| **LangSmith**               | LLM tracing, debugging and observability |
-| **FastAPI**                 | Backend API framework                    |
-| **PostgreSQL**              | Persistent conversation storage          |
-| **Tavily API**              | Web search and destination research      |
-| **AviationStack API**       | Aviation and flight data                 |
-| **Docker**                  | Application containerization             |
-| **Render**                  | Cloud deployment                         |
-| **HTML / CSS / JavaScript** | Frontend interface                       |
+The workflow runs sequentially: `START ➔ flight_agent ➔ hotel_agent ➔ itinerary_agent ➔ final_agent ➔ END`.
+
+| Agent | Core Engine & Tools | Primary Responsibility | State Key Updated |
+| :--- | :--- | :--- | :--- |
+| **✈️ Flight Agent** | `GPT-4o-mini`, `airportsdata`, `pycountry`, AviationStack API | Parses origin/destination from arbitrary natural language, resolves country/city aliases to IATA codes (e.g., `Bangladesh ➔ DAC`, `Japan ➔ NRT`), and pulls live flight schedules. Falls back to `DEFAULT_ORIGIN_IATA` when no origin is provided. | `flight_results`, `llm_calls`, `messages` |
+| **🏨 Hotel Agent** | Tavily Web Search API | Synthesizes an optimized hotel search query from the user intent, queries Tavily for top real-time accommodations, and extracts curated, truncated snippets to prevent LLM prompt bloat. | `hotel_results`, `llm_calls`, `messages` |
+| **🗺️ Itinerary Agent**| `GPT-4o-mini` | Ingests the raw user query alongside retrieved flight and hotel context to generate a structured, realistic day-by-day travel itinerary with morning/afternoon/evening breakdowns. | `itinerary`, `llm_calls`, `messages` |
+| **📝 Final Response Agent**| `GPT-4o-mini` | Assembles all accumulated data points into a clean, 6-part Markdown travel brief, categorizing estimated vs. real-time costs and stripping redundant data. | `messages`, `llm_calls` |
 
 ---
 
-# 📂 Project Structure
+## 🧠 Shared State & Persistence
 
-```text
-NomadQ/
-│
-├── app/
-│   ├── agents/
-│   │   ├── planner.py
-│   │   ├── flight_agent.py
-│   │   ├── hotel_agent.py
-│   │   ├── research_agent.py
-│   │   ├── itinerary_agent.py
-│   │   └── recommendation_agent.py
-│   │
-│   ├── graph/
-│   │   ├── workflow.py
-│   │   └── state.py
-│   │
-│   ├── tools/
-│   │   ├── aviationstack.py
-│   │   └── tavily_search.py
-│   │
-│   ├── database/
-│   │   └── postgres.py
-│   │
-│   └── main.py
-│
-├── frontend/
-│   ├── index.html
-│   ├── style.css
-│   └── script.js
-│
-├── tests/
-│
-├── Dockerfile
-├── requirements.txt
-├── .env.example
-├── render.yaml
-├── .gitignore
-└── README.md
+### 1. `TravelState` Schema
+Agents exchange data exclusively through a shared `TypedDict` passed across graph nodes:
+
+```python
+class TravelState(TypedDict):
+    messages: Annotated[list[AnyMessage], operator.add]
+    user_query: str
+    flight_results: str
+    hotel_results: str
+    itinerary: str
+    llm_calls: int
 ```
 
-> The exact structure may vary depending on the current implementation.
+### 2. PostgreSQL Checkpointing
+State is persisted across runs using LangGraph's native `PostgresSaver`. Every request is bound to a `thread_id` (either provided by the client or generated via `uuid.uuid4().hex`):
+
+```python
+config = {"configurable": {"thread_id": thread_id}}
+travel_graph = graph.compile(checkpointer=checkpointer)
+```
+
+* **Client Reconnection:** The frontend retains `thread_id` in `localStorage`, maintaining continuity across refreshes.
+* **Architecture Note:** Checkpointing persists graph execution frames and workflow checkpoints; agent prompts currently focus on the active request run rather than full long-term semantic conversation summarization.
 
 ---
 
-# 🔗 Agent Responsibilities
+## 📁 Repository Structure
 
-## 1. Planner Agent
-
-The Planner Agent acts as the entry point of the system.
-
-Responsibilities:
-
-* Understand natural-language requests
-* Identify user constraints
-* Extract trip requirements
-* Decide which downstream tasks are required
-* Route work through the LangGraph workflow
-
-Example:
-
-```text
-Input:
-"Plan a 4-day trip to Dubai under ₹60,000"
-
-Planner Output:
-
-destination = Dubai
-duration = 4 days
-budget = ₹60,000
-
-required_tasks:
-    flight_search
-    hotel_search
-    destination_research
-    itinerary_generation
+```
+NomadQ---Autonomous-Multi-Agent-Travel-Orchestrator/
+├── app.py                  # FastAPI server, route endpoints & static asset mounts
+├── backend.py              # LangGraph workflow, agent node logic & PostgresSaver setup
+├── main.py                 # Application entry point
+├── tools/
+│   ├── __init__.py
+│   ├── flight_tool.py      # Route extraction (GPT-4o-mini), IATA mapping, AviationStack
+│   └── tavily_tool.py      # Tavily search query execution and snippet truncation
+├── templates/
+│   └── index.html          # Jinja2-rendered single-page interface
+├── static/
+│   ├── style.css           # Modern UI styling
+│   └── script.js           # Fetch API logic, Marked.js parsing, and PDF downloads
+├── Dockerfile              # Production multi-stage Docker build
+├── requirements.txt        # Pinned pip dependencies
+├── pyproject.toml          # Project configuration (uv-compatible)
+├── uv.lock                 # Fast reproducible dependency lockfile
+└── .env.example            # Environment template
 ```
 
 ---
 
-## 2. Flight Agent
+## 🌐 API Reference
 
-The Flight Agent handles flight-related tasks.
+### `POST /api/travel`
+Executes the multi-agent travel orchestration graph.
 
-Responsibilities:
+**Request Body:**
+```json
+{
+  "message": "Plan a 7-day trip to Japan from Bangladesh under ₹2 lakhs.",
+  "thread_id": "optional_existing_thread_id"
+}
+```
 
-* Query aviation information
-* Process flight results
-* Filter according to trip requirements
-* Pass relevant information to the itinerary workflow
+**Response (`200 OK`):**
+```json
+{
+  "success": true,
+  "thread_id": "user_a1b2c3d4e5f6",
+  "answer": "# Japan Trip Planning\n\n## 1. Trip Summary...",
+  "flight_results": "DAC -> NRT direct/connecting schedules...",
+  "hotel_results": "Tokyo accommodations snippet context...",
+  "itinerary": "Day 1: Arrival in Tokyo...",
+  "llm_calls": 4
+}
+```
 
-Integration:
-
-```text
-Flight Agent
-     │
-     ▼
-AviationStack API
-     │
-     ▼
-Flight Data
+### `GET /health`
+Returns system status for container orchestration and uptime monitors.
+```json
+{
+  "status": "ok",
+  "message": "AI Travel Planner API is running"
+}
 ```
 
 ---
 
-## 3. Hotel Agent
+## 🛠️ Tech Stack
 
-The Hotel Agent focuses on accommodation research.
-
-It can consider:
-
-* Location
-* Budget
-* User preferences
-* Proximity to attractions
-* Trip duration
-
-The result is passed to the final planning stage.
+* **Orchestration:** LangGraph, LangChain Core
+* **LLMs:** OpenAI (`GPT-4o-mini` for structured routing, `GPT-4o-mini` for planning & synthesis)
+* **Backend:** FastAPI, Uvicorn, Pydantic
+* **Persistence:** PostgreSQL, `langgraph-checkpoint-postgres`
+* **External APIs:** AviationStack (Flight metadata), Tavily (Search engine)
+* **Domain Libraries:** `airportsdata`, `pycountry`
+* **Frontend:** Vanilla HTML5/CSS3/ES6+, `Marked.js` (Markdown parsing), `html2pdf.js` (Client-side export)
+* **Observability:** LangSmith (`LANGSMITH_TRACING=true`)
+* **DevOps:** Docker, Render
 
 ---
 
-## 4. Research Agent
+## ⚡ Getting Started
 
-The Research Agent performs destination-level research using Tavily.
+### Prerequisites
+* Python 3.11+ or Docker installed
+* PostgreSQL database instance running
+* API keys for OpenAI, Tavily, and AviationStack
 
-Typical research queries may include:
-
-```text
-Best things to do in Bali
-Best beaches in Bali
-Best local food in Bali
-Best cafes in Bali
-Bali nightlife
-```
-
-The agent converts retrieved information into useful travel context.
-
----
-
-## 5. Itinerary Agent
-
-The Itinerary Agent converts raw travel information into a practical day-by-day plan.
-
-The workflow considers:
-
-```text
-Destination
-    +
-Duration
-    +
-Interests
-    +
-Budget
-    +
-Research
-    +
-Flight / Hotel Context
-        ↓
-Structured Itinerary
-```
-
----
-
-## 6. Recommendation Agent
-
-The Recommendation Agent adds personalization.
-
-It can use:
-
-* User preferences
-* Budget constraints
-* Previous conversational context
-* Trip purpose
-* Activities of interest
-
-to refine the final plan.
-
----
-
-# 🧠 Stateful Conversations
-
-NomadQ uses **PostgreSQL** for persistent conversation storage.
-
-This allows the system to maintain context across interactions.
-
-For example:
-
-```text
-User:
-Plan a trip to Goa.
-
-Assistant:
-Sure. What is your budget?
-
-User:
-Around ₹30,000.
-
-Assistant:
-Based on your ₹30,000 budget...
-```
-
-Instead of treating each message as an isolated request, the application can retrieve previous conversation state and use it when processing subsequent requests.
-
----
-
-# 🔍 LLM Observability with LangSmith
-
-Debugging multi-agent applications can be difficult because a single user request may trigger several LLM calls and tools.
-
-NomadQ integrates **LangSmith** to provide visibility into the agent workflow.
-
-The traces can be used to inspect:
-
-```text
-User Request
-     ↓
-Planner
-     ↓
-Flight Agent
-     ↓
-Research Agent
-     ↓
-Itinerary Agent
-     ↓
-Recommendation Agent
-     ↓
-Final Response
-```
-
-This makes it easier to identify:
-
-* Slow operations
-* Incorrect agent routing
-* Unexpected LLM outputs
-* Tool failures
-* Prompt issues
-* Workflow bottlenecks
-
----
-
-# 🐳 Docker Deployment
-
-NomadQ is containerized using Docker.
-
-A simplified deployment flow:
-
-```text
-Source Code
-    ↓
-Docker Build
-    ↓
-Container Image
-    ↓
-Render
-    ↓
-Running FastAPI Service
-```
-
-Example Docker workflow:
-
+### 1. Clone & Setup Environment
 ```bash
-docker build -t nomadq .
-docker run -p 8000:8000 nomadq
-```
+git clone [https://github.com/imdwnyn/NomadQ---Autonomous-Multi-Agent-Travel-Orchestrator.git](https://github.com/imdwnyn/NomadQ---Autonomous-Multi-Agent-Travel-Orchestrator.git)
+cd NomadQ---Autonomous-Multi-Agent-Travel-Orchestrator
 
----
+# Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# ☁️ Deployment
-
-The FastAPI application is deployed using **Render**.
-
-The production architecture is approximately:
-
-```text
-                    Internet
-                       │
-                       ▼
-                  Render Service
-                       │
-                       ▼
-                  FastAPI App
-                       │
-             ┌─────────┴─────────┐
-             ▼                   ▼
-        LangGraph             PostgreSQL
-             │
-       ┌─────┼─────┐
-       ▼     ▼     ▼
-    OpenAI Tavily AviationStack
-```
-
----
-
-# ⚙️ Local Setup
-
-## 1. Clone the Repository
-
-```bash
-git clone https://github.com/<your-username>/NomadQ.git
-cd NomadQ
-```
-
----
-
-## 2. Create a Virtual Environment
-
-### Windows
-
-```bash
-python -m venv venv
-venv\Scripts\activate
-```
-
-### macOS / Linux
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
----
-
-## 3. Install Dependencies
-
-```bash
+# Install dependencies using pip or uv
 pip install -r requirements.txt
+# or: uv sync
 ```
 
----
-
-## 4. Configure Environment Variables
-
-Create a `.env` file:
-
+### 2. Environment Configuration
+Create a `.env` file based on `.env.example`:
 ```env
+DATABASE_URL=postgresql://user:password@localhost:5432/nomadq
 OPENAI_API_KEY=your_openai_api_key
-
-TAVILY_API_KEY=your_tavily_api_key
-
 AVIATIONSTACK_API_KEY=your_aviationstack_api_key
+TAVILY_API_KEY=your_tavily_api_key
+DEFAULT_ORIGIN_IATA=IXS
 
-LANGCHAIN_API_KEY=your_langsmith_api_key
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_PROJECT=nomadq
-
-DATABASE_URL=your_postgresql_connection_string
+# Observability (Optional)
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your_langsmith_api_key
+LANGSMITH_PROJECT=NomadQ
+LANGSMITH_ENDPOINT=[https://api.smith.langchain.com](https://api.smith.langchain.com)
 ```
 
-> Never commit your `.env` file or API keys to GitHub.
+### 3. Run Locally
+```bash
+uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+```
+Access the application at `http://127.0.0.1:8000`.
 
 ---
 
-# ▶️ Running the Application
+## 🐳 Docker Deployment
 
-Start the FastAPI server:
+To build and launch the containerized application locally or for cloud environments (e.g., Render):
 
 ```bash
-uvicorn app.main:app --reload
-```
+# Build the Docker image
+docker build -t nomadq:latest .
 
-The API will be available at:
-
-```text
-http://localhost:8000
-```
-
-FastAPI documentation:
-
-```text
-http://localhost:8000/docs
+# Run the container with environment variables
+docker run -d \
+  --name nomadq \
+  -p 8000:8000 \
+  --env-file .env \
+  nomadq:latest
 ```
 
 ---
 
-# 🐳 Running with Docker
+## 🔮 Roadmap & Extensions
 
-Build the Docker image:
-
-```bash
-docker build -t nomadq .
-```
-
-Run the container:
-
-```bash
-docker run --env-file .env -p 8000:8000 nomadq
-```
-
-The application should then be accessible at:
-
-```text
-http://localhost:8000
-```
+- [ ] **Parallel Graph Execution:** Branch out the Flight Agent and Hotel Agent concurrently using LangGraph branching to minimize overall request latency.
+- [ ] **Conditional Subgraphs:** Implement routing edges that bypass the flight agent when dealing strictly with domestic or ground travel prompts.
+- [ ] **Live Price Providers:** Integrate real-time airline ticketing engines (Amadeus / Skyscanner APIs) alongside flight status feeds.
+- [ ] **Interactive Conversational Memory:** Enable iterative replanning prompts (e.g., *"Make day 3 budget-friendly"* or *"Add an extra day in Kyoto"*).
 
 ---
 
-# 🔐 Environment Variables
+## 📜 License
 
-| Variable                | Description                      |
-| ----------------------- | -------------------------------- |
-| `OPENAI_API_KEY`        | OpenAI API authentication        |
-| `TAVILY_API_KEY`        | Tavily search API authentication |
-| `AVIATIONSTACK_API_KEY` | AviationStack API authentication |
-| `LANGCHAIN_API_KEY`     | LangSmith authentication         |
-| `LANGCHAIN_TRACING_V2`  | Enables LangSmith tracing        |
-| `LANGCHAIN_PROJECT`     | LangSmith project name           |
-| `DATABASE_URL`          | PostgreSQL connection string     |
-
----
-
-# 🔄 Example Workflow
-
-### User Input
-
-```text
-Plan a 5-day trip to Singapore from Kolkata.
-My budget is ₹50,000.
-I like food, nightlife and modern architecture.
-```
-
-### Internal Processing
-
-```text
-                    User Query
-                        │
-                        ▼
-                ┌──────────────┐
-                │    Planner   │
-                └──────┬───────┘
-                       │
-       ┌───────────────┼────────────────┐
-       ▼               ▼                ▼
-   Flight          Hotel             Research
-   Agent           Agent              Agent
-       │               │                │
-       └───────────────┼────────────────┘
-                       ▼
-                 Itinerary Agent
-                       │
-                       ▼
-              Recommendation Agent
-                       │
-                       ▼
-                Final Response
-```
-
-### Final Output
-
-The user receives a structured plan containing relevant travel options, accommodation research, activities, and a personalized itinerary.
-
----
-
-# 💡 Why Multi-Agent Instead of One LLM Call?
-
-A single LLM call could theoretically generate an itinerary, but it would have several limitations.
-
-NomadQ separates responsibilities so that each component focuses on a specific task.
-
-### Single-Agent Approach
-
-```text
-User
- ↓
-LLM
- ↓
-Answer
-```
-
-### NomadQ Approach
-
-```text
-User
- ↓
-Planner
- ↓
-Specialized Agents
- ↓
-External Tools
- ↓
-Research
- ↓
-Itinerary
- ↓
-Personalization
- ↓
-Final Answer
-```
-
-Benefits include:
-
-* Clear separation of responsibilities
-* Better workflow control
-* Easier debugging
-* Easier tool integration
-* More extensible architecture
-* Stateful execution
-* Better observability
-
----
-
-# 🧱 Design Principles
-
-## Modularity
-
-Each agent handles a clearly defined responsibility.
-
-## Stateful Execution
-
-LangGraph maintains workflow state between nodes.
-
-## Tool-augmented Reasoning
-
-Agents can call external services instead of relying only on model knowledge.
-
-## Observability
-
-LangSmith provides tracing across the LLM workflow.
-
-## Persistence
-
-PostgreSQL allows conversation state to survive across requests and application restarts.
-
-## Containerization
-
-Docker provides a consistent deployment environment.
-
----
-
-# 🚧 Challenges Addressed
-
-### 1. Coordinating Multiple Agents
-
-A major challenge is ensuring that agents execute in the correct order while sharing relevant state.
-
-**Solution:** LangGraph provides explicit graph-based workflow orchestration.
-
----
-
-### 2. Maintaining Conversation Context
-
-Travel planning often happens over multiple messages.
-
-**Solution:** PostgreSQL-backed persistence allows conversation state to be stored and retrieved.
-
----
-
-### 3. External API Integration
-
-Travel information is distributed across different services.
-
-**Solution:** Dedicated tool integrations allow agents to query specialized data sources.
-
----
-
-### 4. Debugging LLM Workflows
-
-Multiple agents create multiple possible failure points.
-
-**Solution:** LangSmith tracing provides visibility into individual workflow steps and LLM calls.
-
----
-
-### 5. Production Deployment
-
-Running an agentic application requires a consistent environment.
-
-**Solution:** Docker containerization combined with Render deployment.
-
----
-
-# 🔮 Future Improvements
-
-Potential extensions for NomadQ include:
-
-* 💳 Real-time hotel and booking integrations
-* 💰 Dynamic budget optimization
-* 🗺️ Interactive map-based itinerary planning
-* 🚆 Multi-modal transport planning
-* 🌦️ Weather-aware itinerary adjustment
-* 🔔 Flight-delay and travel alerts
-* 👥 Group travel preference aggregation
-* 🧠 Long-term user preference memory
-* ⚡ Parallelized agent execution
-* 📊 Cost and latency monitoring
-* 🧪 Automated agent evaluation
-* 🔁 Agent retry and fallback strategies
-
----
-
-# 🧪 Testing & Evaluation
-
-The system can be evaluated across several dimensions:
-
-### Retrieval Quality
-
-Does the research agent retrieve useful and relevant travel information?
-
-### Planning Quality
-
-Does the itinerary satisfy:
-
-* Duration
-* Budget
-* Preferences
-* Destination constraints?
-
-### Agent Reliability
-
-Does each agent correctly perform its assigned task?
-
-### Response Quality
-
-Is the final output:
-
-* Coherent
-* Structured
-* Personalized
-* Actionable?
-
-### System Performance
-
-Important production metrics include:
-
-```text
-Latency
-Token Usage
-API Calls
-Failure Rate
-Agent Execution Time
-Tool Success Rate
-```
-
-LangSmith can be used to inspect the LLM workflow and support this evaluation process.
-
----
-
-# 📸 Demo
-
-Add screenshots or a GIF here:
-
-```md
-![NomadQ Demo](assets/demo.gif)
-```
-
-Recommended screenshots:
-
-1. Landing page
-2. User travel query
-3. Agent-generated travel plan
-4. Detailed itinerary
-5. LangSmith trace
-6. API documentation
-
----
-
-# 🎥 Demo Flow
-
-A good demo can follow this sequence:
-
-```text
-1. Enter travel request
-        ↓
-2. Planner interprets request
-        ↓
-3. Flight + hotel + research agents run
-        ↓
-4. Itinerary generated
-        ↓
-5. Recommendations personalized
-        ↓
-6. Final travel plan displayed
-```
-
----
-
-# 📜 API
-
-The FastAPI backend exposes HTTP endpoints for interacting with the travel planning system.
-
-Example request:
-
-```http
-POST /chat
-Content-Type: application/json
-```
-
-Example payload:
-
-```json
-{
-  "message": "Plan a 5 day trip to Bali under ₹60000",
-  "conversation_id": "demo-001"
-}
-```
-
-Example response:
-
-```json
-{
-  "conversation_id": "demo-001",
-  "response": "Here is your personalized Bali travel plan..."
-}
-```
-
-The exact endpoints and schemas may vary based on the current implementation.
-
----
-
-# 🛡️ Security
-
-Sensitive configuration is handled through environment variables.
-
-Do not commit:
-
-```text
-.env
-API keys
-Database credentials
-Secret tokens
-```
-
-Recommended `.gitignore` entries:
-
-```gitignore
-.env
-venv/
-__pycache__/
-*.pyc
-```
-
----
-
-# 📈 Project Highlights
-
-NomadQ demonstrates practical experience with modern AI application development:
-
-* Multi-agent system design
-* LangGraph workflow orchestration
-* LLM tool calling
-* External API integration
-* Web research with Tavily
-* LLM observability with LangSmith
-* Stateful applications with PostgreSQL
-* REST API development with FastAPI
-* Docker containerization
-* Cloud deployment with Render
-* Natural-language task decomposition
-* Personalized AI workflows
-
----
-
-# 🧰 Tools & Technologies
-
-```text
-Python
-│
-├── LangGraph
-├── LangChain
-├── OpenAI
-│
-├── FastAPI
-├── PostgreSQL
-│
-├── Tavily API
-├── AviationStack API
-│
-├── LangSmith
-├── Docker
-└── Render
-
-Frontend
-├── HTML
-├── CSS
-└── JavaScript
-```
-
----
-
-# 👨‍💻 Author
-
-**Dwinayan**
-
-Mechanical Engineering Student | Aspiring AI/ML Engineer
-
-GitHub: [@your-username](https://github.com/your-username)
-
----
-
-# ⭐ Acknowledgements
-
-* [LangGraph](https://langchain-ai.github.io/langgraph/)
-* [LangChain](https://www.langchain.com/)
-* [OpenAI](https://openai.com/)
-* [LangSmith](https://smith.langchain.com/)
-* [Tavily](https://tavily.com/)
-* [AviationStack](https://aviationstack.com/)
-* [FastAPI](https://fastapi.tiangolo.com/)
-* [PostgreSQL](https://www.postgresql.org/)
-* [Docker](https://www.docker.com/)
-* [Render](https://render.com/)
-
----
-
-# 📄 License
-
-This project is intended for educational and portfolio purposes.
-
-Add the appropriate license for your repository if you plan to distribute the project publicly.
+Distributed under the **MIT License**. See `LICENSE` for more information.
