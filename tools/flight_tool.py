@@ -1,12 +1,21 @@
-import os 
-import re 
+import os
+import re
 import certifi
 import airportsdata
 import pycountry
 import requests
+
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from typing import Optional
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
+
+llm = ChatOpenAI(
+    model="gpt-4o-mini",
+    temperature=0
+)
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
@@ -283,227 +292,194 @@ def resolve_location_to_iata(location: str):
 
     return None
 
+# ============================================================
+# LLM-BASED ROUTE EXTRACTION
+# ============================================================
+
+class RouteExtraction(BaseModel):
+    origin: Optional[str] = Field(
+        default=None,
+        description="Departure location mentioned by the user"
+    )
+
+    destination: Optional[str] = Field(
+        default=None,
+        description="Arrival location mentioned by the user"
+    )
 
 
-
-def find_location_mentions(query: str):
-    """
-    Finds country or city names inside a natural language query.
-    """
-
-    q = query.lower()
-    mentions = []
-
-    # Country aliases
-    for alias in COUNTRY_ALIASES:
-        if re.search(rf"\b{re.escape(alias)}\b", q):
-            mentions.append(alias)
-
-    # Country names from pycountry
-    for country in pycountry.countries:
-        name = country.name.lower()
-        if len(name) >= 4 and re.search(rf"\b{re.escape(name)}\b", q):
-            mentions.append(name)
-
-    # City names from our preferred city map
-    for city in CITY_MAIN_AIRPORT:
-        if re.search(rf"\b{re.escape(city)}\b", q):
-            mentions.append(city)
-
-    # Remove duplicate while keeping order
-    unique_mentions = []
-    for item in mentions:
-        if item not in unique_mentions:
-            unique_mentions.append(item)
-
-    return unique_mentions
+route_llm = llm.with_structured_output(RouteExtraction)
 
 
 def parse_route(query: str):
     """
+    Extract departure and arrival locations from a natural-language
+    travel query using ChatOpenAI.
+
+    The LLM extracts the location names.
+    The existing resolve_location_to_iata() function then converts
+    those locations into valid IATA airport codes.
+
     Returns:
         dep_iata, arr_iata
-
-    Examples:
-        "from Delhi to Dubai" -> DEL, DXB
-        "to Dubai from Delhi" -> DEL, DXB
-        "Dubai trip from Delhi" -> DEL, DXB
-        "Japan trip from Bangladesh" -> DAC, NRT
-        "flights from Delhi" -> DEL, None
-        "flights to Dubai" -> None, DXB
     """
 
-    q = query.strip()
-    q_lower = q.lower()
-
-    # =========================
-    # Global / all-country query
-    # =========================
-
-    global_keywords = [
-        "all country",
-        "all countries",
-        "global flight",
-        "global flights",
-        "all flight",
-        "all flights",
-        "worldwide flight",
-        "worldwide flights",
-    ]
-
-    if any(keyword in q_lower for keyword in global_keywords):
+    if not query or not query.strip():
         return None, None
 
-    # =========================
-    # Direct IATA route
-    # Example: DEL to DXB
-    # =========================
+    prompt = f"""
+You are a travel route extraction assistant.
 
-    codes = re.findall(r"\b[A-Z]{3}\b", q)
+Your job is to extract the departure location and destination
+from the user's travel request.
 
-    if len(codes) >= 2:
-        return codes[0].upper(), codes[1].upper()
+IMPORTANT RULES:
 
-    # =========================
-    # "from X to Y"
-    # =========================
+1. origin means the place the traveler is departing from.
 
-    match = re.search(
-        r"\bfrom\s+(.+?)\s+\bto\s+(.+?)(?:\s+(?:on|for|under|including|with|in|at)\b|[.!?]|$)",
-        q_lower,
-    )
+2. destination means the place the traveler wants to travel to.
 
-    if match:
-        origin_text = match.group(1)
-        dest_text = match.group(2)
+3. Locations can be:
+   - cities
+   - countries
+   - airports
+   - IATA airport codes
+   - regions
 
-        dep_iata = resolve_location_to_iata(origin_text)
-        arr_iata = resolve_location_to_iata(dest_text)
+4. Return the location as mentioned by the user.
+
+5. DO NOT convert the location into an IATA code.
+   Another function will handle that.
+
+6. DO NOT invent a location.
+
+7. If the user does not specify the departure location,
+   return origin as null.
+
+8. If the user does not specify the destination,
+   return destination as null.
+
+9. Ignore:
+   - dates
+   - duration
+   - budget
+   - hotels
+   - sightseeing
+   - number of travelers
+   - activities
+   - preferences
+
+10. Understand the meaning of the entire sentence.
+    Do NOT depend on fixed phrases such as "from" and "to".
+
+Examples:
+
+User:
+"Find flights from Delhi to Dubai"
+
+origin = "Delhi"
+destination = "Dubai"
+
+
+User:
+"I want to travel to Japan from Bangladesh"
+
+origin = "Bangladesh"
+destination = "Japan"
+
+
+User:
+"Plan a vacation in Paris"
+
+origin = null
+destination = "Paris"
+
+
+User:
+"I'll be leaving Mumbai and heading towards London"
+
+origin = "Mumbai"
+destination = "London"
+
+
+User:
+"Take me from Bangalore to New York for 5 days"
+
+origin = "Bangalore"
+destination = "New York"
+
+
+User:
+"I need a flight leaving from Kolkata"
+
+origin = "Kolkata"
+destination = null
+
+
+User:
+"Show me flights going to Singapore"
+
+origin = null
+destination = "Singapore"
+
+
+User:
+"Delhi airport to Tokyo airport"
+
+origin = "Delhi airport"
+destination = "Tokyo airport"
+
+
+User:
+"Book me a trip to Thailand, I'm starting from Silchar"
+
+origin = "Silchar"
+destination = "Thailand"
+
+
+Now extract the route from this user request:
+
+{query}
+"""
+
+    try:
+        result = route_llm.invoke(prompt)
+
+        origin = result.origin
+        destination = result.destination
+
+        print("\n========== LLM ROUTE EXTRACTION ==========")
+        print(f"User query   : {query}")
+        print(f"Origin       : {origin}")
+        print(f"Destination  : {destination}")
+
+        # ----------------------------------------------------
+        # Convert natural-language locations to IATA codes
+        # ----------------------------------------------------
+
+        dep_iata = resolve_location_to_iata(origin)
+        arr_iata = resolve_location_to_iata(destination)
+
+        # ----------------------------------------------------
+        # Default origin
+        # ----------------------------------------------------
+        # If user only specifies destination, use the
+        # configured default airport.
+        # ----------------------------------------------------
+
+        if dep_iata is None and origin is None:
+            dep_iata = DEFAULT_ORIGIN_IATA
+
+        print(f"IATA origin  : {dep_iata}")
+        print(f"IATA arrival : {arr_iata}")
+        print("==========================================\n")
 
         return dep_iata, arr_iata
 
-    # =========================
-    # "to Y from X"
-    # =========================
-
-    match = re.search(
-        r"\bto\s+(.+?)\s+\bfrom\s+(.+?)(?:\s+(?:on|for|under|including|with|in|at)\b|[.!?]|$)",
-        q_lower,
-    )
-
-    if match:
-        dest_text = match.group(1)
-        origin_text = match.group(2)
-
-        dep_iata = resolve_location_to_iata(origin_text)
-        arr_iata = resolve_location_to_iata(dest_text)
-
-        return dep_iata, arr_iata
-
-    # =========================
-    # "destination trip from origin"
-    #
-    # Example:
-    # Dubai trip from Delhi
-    # Japan trip from Bangladesh
-    # =========================
-
-    match = re.search(
-        r"\b(.+?)\s+trip\s+from\s+(.+?)(?:\s+(?:with|including|under|on|for)\b|[.!?]|$)",
-        q_lower,
-    )
-
-    if match:
-        destination_text = match.group(1)
-        origin_text = match.group(2)
-
-        dep_iata = resolve_location_to_iata(origin_text)
-
-        # Try to resolve destination directly
-        arr_iata = resolve_location_to_iata(destination_text)
-
-        if dep_iata and arr_iata:
-            return dep_iata, arr_iata
-
-        # If destination contains extra words, search mentions
-        destination_mentions = find_location_mentions(destination_text)
-
-        if destination_mentions:
-            arr_iata = resolve_location_to_iata(destination_mentions[-1])
-
-        return dep_iata, arr_iata
-
-    # =========================
-    # "X to Y"
-    # Example: Delhi to Dubai
-    # =========================
-
-    match = re.search(
-        r"^(.+?)\s+\bto\b\s+(.+?)(?:\s+(?:flights?|tickets?|on|for|under|including|with|in|at)\b|[.!?]|$)",
-        q_lower
-    )
-
-    if match:
-        origin_text = match.group(1)
-        dest_text = match.group(2)
-
-        dep_iata = resolve_location_to_iata(origin_text)
-        arr_iata = resolve_location_to_iata(dest_text)
-
-        return dep_iata, arr_iata
-
-    # =========================
-    # "from X"
-    # =========================
-
-    match = re.search(
-        r"\bfrom\s+(.+?)(?:[.!?]|$)",
-        q_lower
-    )
-
-    if match:
-        origin_text = match.group(1)
-
-        dep_iata = resolve_location_to_iata(origin_text)
-
-        return dep_iata, None
-
-    # =========================
-    # "to X"
-    # =========================
-
-    match = re.search(
-        r"\bto\s+(.+?)(?:[.!?]|$)",
-        q_lower
-    )
-
-    if match:
-        dest_text = match.group(1)
-
-        arr_iata = resolve_location_to_iata(dest_text)
-
-        return None, arr_iata
-
-    # =========================
-    # Fallback: location mentions
-    # =========================
-
-    mentions = find_location_mentions(q)
-
-    if len(mentions) >= 2:
-        dep_iata = resolve_location_to_iata(mentions[0])
-        arr_iata = resolve_location_to_iata(mentions[1])
-
-        return dep_iata, arr_iata
-
-    if len(mentions) == 1:
-        arr_iata = resolve_location_to_iata(mentions[0])
-
-        return DEFAULT_ORIGIN_IATA, arr_iata
-
-    return None, None
-
-
+    except Exception as e:
+        print(f"LLM route extraction failed: {e}")
+        return None, None
+    
 def format_flight(flight: dict):
     airline = flight.get("airline", {}).get("name") or "Unknown airline"
     flight_number = flight.get("flight", {}).get("iata") or "Unknown flight number"
@@ -622,15 +598,19 @@ def search_flights(query: str, limit: int = 10):
 
 if __name__ == "__main__":
 
-    tests = [
-        "Plan a 5 days Dubai trip from Delhi",
-        "Plan a 7 days Japan trip from Bangladesh",
-        "Plan a 7 days Thailand trip from Silchar",
-        "flights from Delhi",
-        "flights to Dubai",
-        "Delhi to Dubai flights",
+    test_queries = [
+        "Find flights from Delhi to Dubai",
+        "I want to travel to Japan from Bangladesh",
+        "I'll be leaving Mumbai and heading towards London",
+        "Show me flights going to Singapore",
+        "Book me a trip to Thailand, I'm starting from Silchar",
     ]
 
-    for query in tests:
-        print("\nQUERY:", query)
-        print("ROUTE:", parse_route(query))
+    for query in test_queries:
+        print("\n----------------------------------------")
+        print(f"TEST: {query}")
+
+        dep, arr = parse_route(query)
+
+        print(f"Departure IATA: {dep}")
+        print(f"Arrival IATA:   {arr}")
